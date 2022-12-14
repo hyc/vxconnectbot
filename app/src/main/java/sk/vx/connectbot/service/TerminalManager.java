@@ -19,11 +19,10 @@ package sk.vx.connectbot.service;
 
 import java.io.IOException;
 import java.lang.ref.WeakReference;
-import java.security.PrivateKey;
-import java.security.PublicKey;
+import java.security.KeyPair;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -68,19 +67,17 @@ import android.util.Log;
 public class TerminalManager extends Service implements BridgeDisconnectedListener, OnSharedPreferenceChangeListener {
 	public final static String TAG = "ConnectBot.TerminalManager";
 
-	public List<TerminalBridge> bridges = new LinkedList<TerminalBridge>();
-	public Map<HostBean, WeakReference<TerminalBridge>> mHostBridgeMap =
-		new HashMap<HostBean, WeakReference<TerminalBridge>>();
-	public Map<String, WeakReference<TerminalBridge>> mNicknameBridgeMap =
-		new HashMap<String, WeakReference<TerminalBridge>>();
+	public ArrayList<TerminalBridge> bridges = new ArrayList<>();
+	public Map<HostBean, WeakReference<TerminalBridge>> mHostBridgeMap = new HashMap<>();
+	public Map<String, WeakReference<TerminalBridge>> mNicknameBridgeMap = new HashMap<>();
 
 	public TerminalBridge defaultBridge = null;
 
-	public List<HostBean> disconnected = new LinkedList<HostBean>();
+	public List<HostBean> disconnected = new ArrayList<>();
 
 	public Handler disconnectHandler = null;
 
-	public Map<String, KeyHolder> loadedKeypairs = new HashMap<String, KeyHolder>();
+	public Map<String, KeyHolder> loadedKeypairs = new HashMap<>();
 
 	public Resources res;
 
@@ -113,8 +110,7 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 
 	private boolean savingKeys;
 
-	protected List<WeakReference<TerminalBridge>> mPendingReconnect
-			= new LinkedList<WeakReference<TerminalBridge>>();
+	protected List<WeakReference<TerminalBridge>> mPendingReconnect = new ArrayList<>();
 
 	public boolean hardKeyboardHidden;
 
@@ -138,11 +134,8 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 
 		for (PubkeyBean pubkey : pubkeys) {
 			try {
-				PrivateKey privKey = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(), pubkey.getType());
-				PublicKey pubKey = pubkey.getPublicKey();
-				Object trileadKey = PubkeyUtils.convertToTrilead(privKey, pubKey);
-
-				addKey(pubkey, trileadKey);
+				KeyPair pair = PubkeyUtils.convertToKeyPair(pubkey, null);
+				addKey(pubkey, pair);
 			} catch (Exception e) {
 				Log.d(TAG, String.format("Problem adding key '%s' to in-memory cache", pubkey.getNickname()), e);
 			}
@@ -240,7 +233,7 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 
 		synchronized (bridges) {
 			bridges.add(bridge);
-			WeakReference<TerminalBridge> wr = new WeakReference<TerminalBridge>(bridge);
+			WeakReference<TerminalBridge> wr = new WeakReference<>(bridge);
 			mHostBridgeMap.put(bridge.host, wr);
 			mNicknameBridgeMap.put(bridge.host.getNickname(), wr);
 		}
@@ -333,6 +326,7 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 	/**
 	 * Called by child bridge when somehow it's been disconnected.
 	 */
+	@Override
 	public void onDisconnected(TerminalBridge bridge) {
 		boolean shouldHideRunningNotification = false;
 
@@ -370,21 +364,21 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 		return loadedKeypairs.containsKey(nickname);
 	}
 
-	public void addKey(PubkeyBean pubkey, Object trileadKey) {
-		addKey(pubkey, trileadKey, false);
+	public void addKey(PubkeyBean pubkey, KeyPair pair) {
+		addKey(pubkey, pair, false);
 	}
 
-	public void addKey(PubkeyBean pubkey, Object trileadKey, boolean force) {
+	public void addKey(PubkeyBean pubkey, KeyPair pair, boolean force) {
 		if (!savingKeys && !force)
 			return;
 
 		removeKey(pubkey.getNickname());
 
-		byte[] sshPubKey = PubkeyUtils.extractOpenSSHPublic(trileadKey);
+		byte[] sshPubKey = PubkeyUtils.extractOpenSSHPublic(pair);
 
 		KeyHolder keyHolder = new KeyHolder();
 		keyHolder.bean = pubkey;
-		keyHolder.trileadKey = trileadKey;
+		keyHolder.pair = pair;
 		keyHolder.openSSHPubkey = sshPubKey;
 
 		loadedKeypairs.put(pubkey.getNickname(), keyHolder);
@@ -424,18 +418,18 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 			return false;
 	}
 
-	public Object getKey(String nickname) {
+	public KeyPair getKey(String nickname) {
 		if (loadedKeypairs.containsKey(nickname)) {
 			KeyHolder keyHolder = loadedKeypairs.get(nickname);
-			return keyHolder.trileadKey;
+			return keyHolder.pair;
 		} else
 			return null;
 	}
 
-	public Object getKey(byte[] publicKey) {
+	public KeyPair getKey(byte[] publicKey) {
 		for (KeyHolder keyHolder : loadedKeypairs.values()) {
 			if (Arrays.equals(keyHolder.openSSHPubkey, publicKey))
-				return keyHolder.trileadKey;
+				return keyHolder.pair;
 		}
 		return null;
 	}
@@ -663,7 +657,7 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 
 	public static class KeyHolder {
 		public PubkeyBean bean;
-		public Object trileadKey;
+		public KeyPair pair;
 		public byte[] openSSHPubkey;
 	}
 
@@ -705,7 +699,7 @@ public class TerminalManager extends Service implements BridgeDisconnectedListen
 	 */
 	public void requestReconnect(TerminalBridge bridge) {
 		synchronized (mPendingReconnect) {
-			mPendingReconnect.add(new WeakReference<TerminalBridge>(bridge));
+			mPendingReconnect.add(new WeakReference<>(bridge));
 			if (!bridge.isUsingNetwork() ||
 					connectivityManager.isConnected()) {
 				reconnectPending();

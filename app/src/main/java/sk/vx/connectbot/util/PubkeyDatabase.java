@@ -17,7 +17,7 @@
 
 package sk.vx.connectbot.util;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 import sk.vx.connectbot.bean.PubkeyBean;
@@ -49,9 +49,11 @@ public class PubkeyDatabase extends RobustSQLiteOpenHelper {
 	public final static String FIELD_PUBKEY_CONFIRMUSE = "confirmuse";
 	public final static String FIELD_PUBKEY_LIFETIME = "lifetime";
 
-	public final static String KEY_TYPE_RSA = "RSA",
-		KEY_TYPE_DSA = "DSA",
-		KEY_TYPE_IMPORTED = "IMPORTED";
+	public final static String KEY_TYPE_RSA = "RSA";
+	public final static String KEY_TYPE_DSA = "DSA";
+	public final static String KEY_TYPE_IMPORTED = "IMPORTED";
+	public final static String KEY_TYPE_EC = "EC";
+	public final static String KEY_TYPE_ED25519 = "ED25519";
 
 	private Context context;
 
@@ -128,7 +130,7 @@ public class PubkeyDatabase extends RobustSQLiteOpenHelper {
 	private List<PubkeyBean> getPubkeys(String selection, String[] selectionArgs) {
 		SQLiteDatabase db = getReadableDatabase();
 
-		List<PubkeyBean> pubkeys = new LinkedList<PubkeyBean>();
+		List<PubkeyBean> pubkeys = new ArrayList<>();
 
 		Cursor c = db.query(TABLE_PUBKEYS, null, selection, selectionArgs, null, null, null);
 
@@ -213,7 +215,7 @@ public class PubkeyDatabase extends RobustSQLiteOpenHelper {
 	 * in a ListPreference. Sorted by <code>_id</code> ascending.
 	 */
 	public List<CharSequence> allValues(String column) {
-		List<CharSequence> list = new LinkedList<CharSequence>();
+		List<CharSequence> list = new ArrayList<>();
 
 		SQLiteDatabase db = this.getReadableDatabase();
 		Cursor c = db.query(TABLE_PUBKEYS, new String[] { "_id", column },

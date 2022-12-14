@@ -543,6 +543,10 @@ public class HostDatabase extends RobustSQLiteOpenHelper {
 		}
 	}
 
+	public void removeKnownHost(String host, int port, String serverHostKeyAlgorithm, byte[] serverHostKey) {
+		throw new UnsupportedOperationException("removeKnownHost is not implemented");
+	}
+
 	/**
 	 * Build list of known hosts for Trilead library.
 	 * @return
@@ -585,6 +589,37 @@ public class HostDatabase extends RobustSQLiteOpenHelper {
 		return known;
 	}
 
+	public List<String> getHostKeyAlgorithmsForHost(String hostname, int port) {
+		HashMap<String, String> selection = new HashMap<>();
+		selection.put(FIELD_HOST_HOSTNAME, hostname);
+		selection.put(FIELD_HOST_PORT, String.valueOf(port));
+		HostBean hostBean = findHost(selection);
+
+		if (hostBean == null) {
+			return null;
+		}
+
+		ArrayList<String> knownAlgorithms = new ArrayList<>();
+
+		Cursor c = mDb.query(TABLE_KNOWNHOSTS, new String[] {FIELD_KNOWNHOSTS_HOSTKEYALGO},
+				FIELD_KNOWNHOSTS_HOSTID + " = ?",
+				new String[] {String.valueOf(hostBean.getId())}, null, null, null);
+
+		if (c != null) {
+			int COL_ALGO = c.getColumnIndexOrThrow(FIELD_KNOWNHOSTS_HOSTKEYALGO);
+
+			while (c.moveToNext()) {
+				String keyAlgo = c.getString(COL_ALGO);
+				if (keyAlgo != null) {
+					knownAlgorithms.add(keyAlgo);
+				}
+			}
+
+			c.close();
+		}
+
+		return knownAlgorithms;
+	}
 	/**
 	 * Unset any hosts using a pubkey ID that has been deleted.
 	 * @param pubkeyId

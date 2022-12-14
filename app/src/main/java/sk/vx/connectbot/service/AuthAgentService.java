@@ -19,15 +19,21 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
 
-import com.madgag.ssh.android.authagent.AndroidAuthAgent;
-import com.trilead.ssh2.signature.DSAPrivateKey;
-import com.trilead.ssh2.signature.DSAPublicKey;
 import com.trilead.ssh2.signature.DSASHA1Verify;
-import com.trilead.ssh2.signature.DSASignature;
-import com.trilead.ssh2.signature.RSAPrivateKey;
-import com.trilead.ssh2.signature.RSAPublicKey;
 import com.trilead.ssh2.signature.RSASHA1Verify;
-import com.trilead.ssh2.signature.RSASignature;
+import com.trilead.ssh2.signature.ECDSASHA2Verify;
+import com.trilead.ssh2.signature.Ed25519Verify;
+import com.trilead.ssh2.signature.SSHSignature;
+
+import com.madgag.ssh.android.authagent.AndroidAuthAgent;
+import java.security.interfaces.DSAPrivateKey;
+import java.security.interfaces.DSAPublicKey;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
+
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+
 
 public class AuthAgentService extends Service {
 	private static final String TAG = "ConnectBot.AuthAgentService";

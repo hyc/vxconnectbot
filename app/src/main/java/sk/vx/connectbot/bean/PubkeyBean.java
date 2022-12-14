@@ -17,15 +17,9 @@
 
 package sk.vx.connectbot.bean;
 
-import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
-import java.security.PublicKey;
-import java.security.interfaces.DSAPublicKey;
-import java.security.interfaces.RSAPublicKey;
-import java.security.spec.EncodedKeySpec;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.X509EncodedKeySpec;
 
 import sk.vx.connectbot.util.PubkeyDatabase;
 import sk.vx.connectbot.util.PubkeyUtils;
@@ -38,16 +32,12 @@ import android.content.ContentValues;
 public class PubkeyBean extends AbstractBean {
 	public static final String BEAN_NAME = "pubkey";
 
-	private static final String KEY_TYPE_RSA = "RSA";
-
-	private static final String KEY_TYPE_DSA = "DSA";
-
 	/* Database fields */
 	private long id;
 	private String nickname;
 	private String type;
 	private byte[] privateKey;
-	private PublicKey publicKey;
+	private byte[] publicKey;
 	private boolean encrypted = false;
 	private boolean startup = false;
 	private boolean confirmUse = false;
@@ -56,6 +46,7 @@ public class PubkeyBean extends AbstractBean {
 	/* Transient values */
 	private boolean unlocked = false;
 	private Object unlockedPrivate = null;
+	private transient Integer bits;
 
 	@Override
 	public String getBeanName() {
@@ -100,37 +91,18 @@ public class PubkeyBean extends AbstractBean {
 			return privateKey.clone();
 	}
 
-	private PublicKey decodePublicKeyAs(EncodedKeySpec keySpec, String keyType) {
-		try {
-			final KeyFactory kf = KeyFactory.getInstance(keyType);
-			return kf.generatePublic(keySpec);
-		} catch (NoSuchAlgorithmException e) {
-			return null;
-		} catch (InvalidKeySpecException e) {
-			return null;
-		}
-	}
-
 	public void setPublicKey(byte[] encoded) {
-		if (encoded == null) return;
-		final X509EncodedKeySpec pubKeySpec = new X509EncodedKeySpec(encoded);
-		if (type != null) {
-			publicKey = decodePublicKeyAs(pubKeySpec, type);
-		} else {
-			publicKey = decodePublicKeyAs(pubKeySpec, KEY_TYPE_RSA);
-			if (publicKey != null) {
-				type = KEY_TYPE_RSA;
-			} else {
-				publicKey = decodePublicKeyAs(pubKeySpec, KEY_TYPE_DSA);
-				if (publicKey != null) {
-					type = KEY_TYPE_DSA;
-				}
-			}
-		}
+		if (encoded == null)
+			publicKey = null;
+		else
+			publicKey = encoded.clone();
 	}
 
-	public PublicKey getPublicKey() {
-		return publicKey;
+	public byte[] getPublicKey() {
+		if (publicKey == null)
+			return null;
+		else
+			return publicKey.clone();
 	}
 
 	public void setEncrypted(boolean encrypted) {
@@ -182,14 +154,27 @@ public class PubkeyBean extends AbstractBean {
 	}
 
 	public String getDescription() {
+		if (bits == null) {
+			try {
+				bits = PubkeyUtils.getBitStrength(publicKey, type);
+			} catch (NoSuchAlgorithmException | InvalidKeySpecException ignored) {
+			}
+		}
 		StringBuilder sb = new StringBuilder();
-		if (publicKey instanceof RSAPublicKey) {
-			int bits = ((RSAPublicKey) publicKey).getModulus().bitLength();
+		if (PubkeyDatabase.KEY_TYPE_RSA.equals(type)) {
 			sb.append("RSA ");
 			sb.append(bits);
 			sb.append("-bit");
-		} else if (publicKey instanceof DSAPublicKey) {
+		} else if (PubkeyDatabase.KEY_TYPE_DSA.equals(type)) {
 			sb.append("DSA 1024-bit");
+		} else if (PubkeyDatabase.KEY_TYPE_EC.equals(type)) {
+			sb.append("EC");
+			sb.append(bits);
+			sb.append("-bit");
+		} else if (PubkeyDatabase.KEY_TYPE_ED25519.equals(type)) {
+			sb.append("Ed25519");
+			sb.append(bits);
+			sb.append("-bit");
 		} else {
 			sb.append("Unknown Key Type");
 		}
@@ -210,8 +195,7 @@ public class PubkeyBean extends AbstractBean {
 		values.put(PubkeyDatabase.FIELD_PUBKEY_NICKNAME, nickname);
 		values.put(PubkeyDatabase.FIELD_PUBKEY_TYPE, type);
 		values.put(PubkeyDatabase.FIELD_PUBKEY_PRIVATE, privateKey);
-		if (publicKey != null)
-			values.put(PubkeyDatabase.FIELD_PUBKEY_PUBLIC, publicKey.getEncoded());
+		values.put(PubkeyDatabase.FIELD_PUBKEY_PUBLIC, publicKey);
 		values.put(PubkeyDatabase.FIELD_PUBKEY_ENCRYPTED, encrypted ? 1 : 0);
 		values.put(PubkeyDatabase.FIELD_PUBKEY_STARTUP, startup ? 1 : 0);
 		values.put(PubkeyDatabase.FIELD_PUBKEY_CONFIRMUSE, confirmUse ? 1 : 0);

@@ -228,43 +228,21 @@ public class PubkeyListActivity extends ListActivity implements EventListener, F
 		}
 	}
 
-	protected void handleAddKey(PubkeyBean pubkey, String password) {
-		Object trileadKey = null;
-		if(PubkeyDatabase.KEY_TYPE_IMPORTED.equals(pubkey.getType())) {
-			// load specific key using pem format
-			try {
-				trileadKey = PEMDecoder.decode(new String(pubkey.getPrivateKey()).toCharArray(), password);
-			} catch(Exception e) {
-				String message = getResources().getString(R.string.pubkey_failed_add, pubkey.getNickname());
-				Log.e(TAG, message, e);
-				Toast.makeText(PubkeyListActivity.this, message, Toast.LENGTH_LONG).show();
-			}
-
-		} else {
-			// load using internal generated format
-			PrivateKey privKey = null;
-			PublicKey pubKey = null;
-			try {
-				privKey = PubkeyUtils.decodePrivate(pubkey.getPrivateKey(), pubkey.getType(), password);
-				pubKey = pubkey.getPublicKey();
-			} catch (Exception e) {
-				String message = getResources().getString(R.string.pubkey_failed_add, pubkey.getNickname());
-				Log.e(TAG, message, e);
-				Toast.makeText(PubkeyListActivity.this, message, Toast.LENGTH_LONG).show();
-				return;
-			}
-
-			// convert key to trilead format
-			trileadKey = PubkeyUtils.convertToTrilead(privKey, pubKey);
-			Log.d(TAG, "Unlocked key " + PubkeyUtils.formatKey(pubKey));
+	protected void handleAddKey(PubkeyBean keybean, String password) {
+		KeyPair pair = null;
+		try {
+			pair = PubkeyUtils.convertToKeyPair(keybean, password);
+		} catch (PubkeyUtils.BadPasswordException e) {
+			String message = getResources().getString(R.string.pubkey_failed_add, keybean.getNickname());
+			Toast.makeText(PubkeyListActivity.this, message, Toast.LENGTH_LONG).show();
 		}
 
-		if(trileadKey == null) return;
+		if(pair == null) return;
 
-		Log.d(TAG, String.format("Unlocked key '%s'", pubkey.getNickname()));
+		Log.d(TAG, String.format("Unlocked key '%s'", keybean.getNickname()));
 
 		// save this key in memory
-		bound.addKey(pubkey, trileadKey, true);
+		bound.addKey(keybean, pair, true);
 
 		updateHandler.sendEmptyMessage(-1);
 	}

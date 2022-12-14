@@ -25,14 +25,23 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.net.MalformedURLException;
+import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.KeyPair;
+import java.security.interfaces.DSAPrivateKey;
+import java.security.interfaces.DSAPublicKey;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
@@ -63,23 +72,30 @@ import com.trilead.ssh2.InteractiveCallback;
 import com.trilead.ssh2.KnownHosts;
 import com.trilead.ssh2.LocalPortForwarder;
 import com.trilead.ssh2.SCPClient;
-import com.trilead.ssh2.ServerHostKeyVerifier;
+import com.trilead.ssh2.ExtendedServerHostKeyVerifier;
 import com.trilead.ssh2.Session;
 import com.trilead.ssh2.HTTPProxyData;
 import com.trilead.ssh2.HTTPProxyException;
 import com.trilead.ssh2.crypto.PEMDecoder;
-import com.trilead.ssh2.signature.DSAPrivateKey;
-import com.trilead.ssh2.signature.DSAPublicKey;
 import com.trilead.ssh2.signature.DSASHA1Verify;
-import com.trilead.ssh2.signature.RSAPrivateKey;
-import com.trilead.ssh2.signature.RSAPublicKey;
 import com.trilead.ssh2.signature.RSASHA1Verify;
+import com.trilead.ssh2.signature.ECDSASHA2Verify;
+import com.trilead.ssh2.signature.Ed25519Verify;
+import com.trilead.ssh2.crypto.keys.Ed25519PrivateKey;
+import com.trilead.ssh2.crypto.keys.Ed25519PublicKey;
+import com.trilead.ssh2.crypto.keys.Ed25519Provider;
+
 
 /**
  * @author Kenny Root
  *
  */
 public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveCallback, AuthAgentCallback {
+	static {
+		// Since this class deals with Ed25519 keys, we need to make sure this is available.
+		Ed25519Provider.insertIfNeeded();
+	}
+
 	public SSH() {
 		super();
 	}
@@ -102,10 +118,8 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 
 	private final static int AUTH_TRIES = 20;
 
-	static final Pattern hostmask;
-	static {
-		hostmask = Pattern.compile("^(.+)@([0-9a-z.-]+)(:(\\d+))?$", Pattern.CASE_INSENSITIVE);
-	}
+	private static final Pattern hostmask = Pattern.compile(
+			"^(.+)@(([0-9a-z.-]+)|(\\[[a-f:0-9]+\\]))(:(\\d+))?$", Pattern.CASE_INSENSITIVE);
 
 	private boolean compression = false;
 	private String httpproxy = null;
@@ -129,7 +143,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		| ChannelCondition.CLOSED
 		| ChannelCondition.EOF;
 
-	private List<PortForwardBean> portForwards = new LinkedList<PortForwardBean>();
+	private List<PortForwardBean> portForwards = new ArrayList<>();
 
 	private int columns;
 	private int rows;
@@ -140,7 +154,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 	private String useAuthAgent = HostDatabase.AUTHAGENT_NO;
 	private String agentLockPassphrase;
 
-	public class HostKeyVerifier implements ServerHostKeyVerifier {
+	public class HostKeyVerifier extends ExtendedServerHostKeyVerifier {
 		public boolean verifyServerHostKey(String hostname, int port,
 				String serverHostKeyAlgorithm, byte[] serverHostKey) throws IOException {
 
@@ -148,7 +162,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 			KnownHosts hosts = manager.hostdb.getKnownHosts();
 			Boolean result;
 
-			String matchName = String.format("%s:%d", hostname, port);
+			String matchName = String.format(Locale.US, "%s:%d", hostname, port);
 
 			String fingerprint = KnownHosts.createHexFingerprint(serverHostKeyAlgorithm, serverHostKey);
 
@@ -157,6 +171,10 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 				algorithmName = "RSA";
 			else if ("ssh-dss".equals(serverHostKeyAlgorithm))
 				algorithmName = "DSA";
+			else if (serverHostKeyAlgorithm.startsWith("ecdsa-"))
+				algorithmName = "EC";
+			else if ("ssh-ed25519".equals(serverHostKeyAlgorithm))
+				algorithmName = "Ed25519";
 			else
 				algorithmName = serverHostKeyAlgorithm;
 
@@ -187,6 +205,9 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 				String border = new String(atsigns);
 
 				bridge.outputLine(border);
+				bridge.outputLine(header);
+				bridge.outputLine(border);
+
 				bridge.outputLine(manager.res.getString(R.string.host_verification_failure_warning));
 				bridge.outputLine(border);
 
@@ -203,10 +224,25 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 				return result.booleanValue();
 
 				default:
+					bridge.outputLine(manager.res.getString(R.string.terminal_failed));
 					return false;
 			}
 		}
 
+		@Override
+		public List<String> getKnownKeyAlgorithmsForHost(String host, int port) {
+			return manager.hostdb.getHostKeyAlgorithmsForHost(host, port);
+		}
+
+		@Override
+		public void removeServerHostKey(String host, int port, String algorithm, byte[] hostKey) {
+			manager.hostdb.removeKnownHost(host, port, algorithm, hostKey);
+		}
+
+		@Override
+		public void addServerHostKey(String host, int port, String algorithm, byte[] hostKey) {
+			manager.hostdb.saveKnownHost(host, port, algorithm, hostKey);
+		}
 	}
 
 	private void authenticate() {
@@ -241,7 +277,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 							continue;
 
 						if (this.tryPublicKey(host.getUsername(), entry.getKey(),
-								entry.getValue().trileadKey)) {
+								entry.getValue().pair)) {
 							finishConnection();
 							break;
 						}
@@ -300,7 +336,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 	 * @throws IOException
 	 */
 	private boolean tryPublicKey(PubkeyBean pubkey) throws NoSuchAlgorithmException, InvalidKeySpecException, IOException {
-		Object trileadKey = null;
+		KeyPair pair = null;
 		if(manager.isKeyLoaded(pubkey.getNickname())) {
 			// load this key from memory if its already there
 			Log.d(TAG, String.format("Found unlocked key '%s' already in-memory", pubkey.getNickname()));
@@ -310,7 +346,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 					return false;
 			}
 
-			trileadKey = manager.getKey(pubkey.getNickname());
+			pair = manager.getKey(pubkey.getNickname());
 		} else {
 			// otherwise load key from database and prompt for password as needed
 			String password = null;
@@ -325,7 +361,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 
 			if(PubkeyDatabase.KEY_TYPE_IMPORTED.equals(pubkey.getType())) {
 				// load specific key using pem format
-				trileadKey = PEMDecoder.decode(new String(pubkey.getPrivateKey()).toCharArray(), password);
+				pair = PEMDecoder.decode(new String(pubkey.getPrivateKey(), StandardCharsets.UTF_8).toCharArray(), password);
 			} else {
 				// load using internal generated format
 				PrivateKey privKey;
@@ -339,25 +375,25 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 					return false;
 				}
 
-				PublicKey pubKey = pubkey.getPublicKey();
+				PublicKey pubKey = PubkeyUtils.decodePublic(pubkey.getPublicKey(), pubkey.getType());
 
 				// convert key to trilead format
-				trileadKey = PubkeyUtils.convertToTrilead(privKey, pubKey);
+				pair = new KeyPair(pubKey, privKey);
 				Log.d(TAG, "Unlocked key " + PubkeyUtils.formatKey(pubKey));
 			}
 
 			Log.d(TAG, String.format("Unlocked key '%s'", pubkey.getNickname()));
 
 			// save this key in memory
-			manager.addKey(pubkey, trileadKey);
+			manager.addKey(pubkey, pair);
 		}
 
-		return tryPublicKey(host.getUsername(), pubkey.getNickname(), trileadKey);
+		return tryPublicKey(host.getUsername(), pubkey.getNickname(), pair);
 	}
 
-	private boolean tryPublicKey(String username, String keyNickname, Object trileadKey) throws IOException {
+	private boolean tryPublicKey(String username, String keyNickname, KeyPair pair) throws IOException {
 		//bridge.outputLine(String.format("Attempting 'publickey' with key '%s' [%s]...", keyNickname, trileadKey.toString()));
-		boolean success = connection.authenticateWithPublicKey(username, trileadKey);
+		boolean success = connection.authenticateWithPublicKey(username, pair);
 		if(!success)
 			bridge.outputLine(manager.res.getString(R.string.terminal_auth_pubkey_fail, keyNickname));
 		return success;
@@ -497,7 +533,11 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 			Log.e(TAG, "Problem in SSH connection thread during authentication", e);
 
 			// Display the reason in the text.
-			bridge.outputLine(e.getCause().getMessage());
+			Throwable t = e.getCause();
+			do {
+				bridge.outputLine(t.getMessage());
+				t = t.getCause();
+			} while (t != null);
 
 			onDisconnect();
 			return;
@@ -558,7 +598,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		}
 
 		if ((newConditions & ChannelCondition.STDERR_DATA) != 0) {
-			byte discard[] = new byte[256];
+			byte[] discard = new byte[256];
 			while (stderr.available() > 0) {
 				stderr.read(discard);
 			}
@@ -750,7 +790,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 
 			return true;
 		} else if (HostDatabase.PORTFORWARD_DYNAMIC5.equals(portForward.getType())) {
-			DynamicPortForwarder dpf = null;
+			DynamicPortForwarder dpf;
 			dpf = (DynamicPortForwarder)portForward.getIdentifier();
 
 			if (!portForward.isEnabled() || dpf == null) {
@@ -836,9 +876,9 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 	@Override
 	public String getDefaultNickname(String username, String hostname, int port) {
 		if (port == DEFAULT_PORT) {
-			return String.format("%s@%s", username, hostname);
+			return String.format(Locale.US, "%s@%s", username, hostname);
 		} else {
-			return String.format("%s@%s:%d", username, hostname, port);
+			return String.format(Locale.US, "%s@%s:%d", username, hostname, port);
 		}
 	}
 
@@ -854,9 +894,9 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 			.append("://")
 			.append(Uri.encode(matcher.group(1)))
 			.append('@')
-			.append(matcher.group(2));
+			.append(Uri.encode(matcher.group(2)));
 
-		String portString = matcher.group(4);
+		String portString = matcher.group(6);
 		int port = DEFAULT_PORT;
 		if (portString != null) {
 			try {
@@ -885,6 +925,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 	/**
 	 * Handle challenges from keyboard-interactive authentication mode.
 	 */
+	@Override
 	public String[] replyToChallenge(String name, String instruction, int numPrompts, String[] prompt, boolean[] echo) {
 		interactiveCanContinue = true;
 		String[] responses = new String[numPrompts];
@@ -956,19 +997,27 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		this.useAuthAgent = useAuthAgent;
 	}
 
+	@Override
 	public Map<String,byte[]> retrieveIdentities() {
-		Map<String,byte[]> pubKeys = new HashMap<String,byte[]>(manager.loadedKeypairs.size());
+		Map<String,byte[]> pubKeys = new HashMap<>(manager.loadedKeypairs.size());
 
 		for (Entry<String,KeyHolder> entry : manager.loadedKeypairs.entrySet()) {
-			Object trileadKey = entry.getValue().trileadKey;
+			KeyPair pair = entry.getValue().pair;
 
 			try {
-				if (trileadKey instanceof RSAPrivateKey) {
-					RSAPublicKey pubkey = ((RSAPrivateKey) trileadKey).getPublicKey();
-					pubKeys.put(entry.getKey(), RSASHA1Verify.encodeSSHRSAPublicKey(pubkey));
-				} else if (trileadKey instanceof DSAPrivateKey) {
-					DSAPublicKey pubkey = ((DSAPrivateKey) trileadKey).getPublicKey();
-					pubKeys.put(entry.getKey(), DSASHA1Verify.encodeSSHDSAPublicKey(pubkey));
+				PrivateKey privKey = pair.getPrivate();
+				if (privKey instanceof RSAPrivateKey) {
+					RSAPublicKey pubkey = (RSAPublicKey) pair.getPublic();
+					pubKeys.put(entry.getKey(), RSASHA1Verify.encodePublicKey(pubkey));
+				} else if (privKey instanceof DSAPrivateKey) {
+					DSAPublicKey pubkey = (DSAPublicKey) pair.getPublic();
+					pubKeys.put(entry.getKey(), DSASHA1Verify.encodePublicKey(pubkey));
+				} else if (privKey instanceof ECPrivateKey) {
+					ECPublicKey pubkey = (ECPublicKey) pair.getPublic();
+					pubKeys.put(entry.getKey(), ECDSASHA2Verify.getVerifierForKey(pubkey).encodePublicKey(pubkey));
+				} else if (privKey instanceof Ed25519PrivateKey) {
+					Ed25519PublicKey pubkey = (Ed25519PublicKey) pair.getPublic();
+					pubKeys.put(entry.getKey(), Ed25519Verify.get().encodePublicKey(pubkey));
 				} else
 					continue;
 			} catch (IOException e) {
@@ -979,7 +1028,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		return pubKeys;
 	}
 
-	public Object getPrivateKey(byte[] publicKey) {
+	public KeyPair getKeyPair(byte[] publicKey) {
 		String nickname = manager.getKeyNickname(publicKey);
 
 		if (nickname == null)
@@ -1003,29 +1052,34 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		return result;
 	}
 
-	public boolean addIdentity(Object key, String comment, boolean confirmUse, int lifetime) {
+	@Override
+	public boolean addIdentity(KeyPair pair, String comment, boolean confirmUse, int lifetime) {
 		PubkeyBean pubkey = new PubkeyBean();
 //		pubkey.setType(PubkeyDatabase.KEY_TYPE_IMPORTED);
 		pubkey.setNickname(comment);
 		pubkey.setConfirmUse(confirmUse);
 		pubkey.setLifetime(lifetime);
-		manager.addKey(pubkey, key);
+		manager.addKey(pubkey, pair);
 		return true;
 	}
 
+	@Override
 	public boolean removeAllIdentities() {
 		manager.loadedKeypairs.clear();
 		return true;
 	}
 
+	@Override
 	public boolean removeIdentity(byte[] publicKey) {
 		return manager.removeKey(publicKey);
 	}
 
+	@Override
 	public boolean isAgentLocked() {
 		return agentLockPassphrase != null;
 	}
 
+	@Override
 	public boolean requestAgentUnlock(String unlockPassphrase) {
 		if (agentLockPassphrase == null)
 			return false;
@@ -1036,6 +1090,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 		return agentLockPassphrase == null;
 	}
 
+	@Override
 	public boolean setAgentLock(String lockPassphrase) {
 		if (agentLockPassphrase != null)
 			return false;
