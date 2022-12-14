@@ -72,7 +72,7 @@ import com.trilead.ssh2.InteractiveCallback;
 import com.trilead.ssh2.KnownHosts;
 import com.trilead.ssh2.LocalPortForwarder;
 import com.trilead.ssh2.SCPClient;
-import com.trilead.ssh2.ExtendedServerHostKeyVerifier;
+import com.trilead.ssh2.ServerHostKeyVerifier;
 import com.trilead.ssh2.Session;
 import com.trilead.ssh2.HTTPProxyData;
 import com.trilead.ssh2.HTTPProxyException;
@@ -154,7 +154,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 	private String useAuthAgent = HostDatabase.AUTHAGENT_NO;
 	private String agentLockPassphrase;
 
-	public class HostKeyVerifier extends ExtendedServerHostKeyVerifier {
+	public class HostKeyVerifier implements ServerHostKeyVerifier {
 		public boolean verifyServerHostKey(String hostname, int port,
 				String serverHostKeyAlgorithm, byte[] serverHostKey) throws IOException {
 
@@ -227,21 +227,6 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 					bridge.outputLine(manager.res.getString(R.string.terminal_failed));
 					return false;
 			}
-		}
-
-		@Override
-		public List<String> getKnownKeyAlgorithmsForHost(String host, int port) {
-			return manager.hostdb.getHostKeyAlgorithmsForHost(host, port);
-		}
-
-		@Override
-		public void removeServerHostKey(String host, int port, String algorithm, byte[] hostKey) {
-			manager.hostdb.removeKnownHost(host, port, algorithm, hostKey);
-		}
-
-		@Override
-		public void addServerHostKey(String host, int port, String algorithm, byte[] hostKey) {
-			manager.hostdb.saveKnownHost(host, port, algorithm, hostKey);
 		}
 	}
 
@@ -770,12 +755,8 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 
 			portForward.setEnabled(false);
 
-			try {
-				lpf.close();
-			} catch (IOException e) {
-				Log.e(TAG, "Could not stop local port forwarder, setting enabled to false", e);
-				return false;
-			}
+
+			lpf.close();
 
 			return true;
 		} else if (HostDatabase.PORTFORWARD_REMOTE.equals(portForward.getType())) {
@@ -800,12 +781,7 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 
 			portForward.setEnabled(false);
 
-			try {
-				dpf.close();
-			} catch (IOException e) {
-				Log.e(TAG, "Could not stop dynamic port forwarder, setting enabled to false", e);
-				return false;
-			}
+			dpf.close();
 
 			return true;
 		} else {
@@ -1008,10 +984,10 @@ public class SSH extends AbsTransport implements ConnectionMonitor, InteractiveC
 				PrivateKey privKey = pair.getPrivate();
 				if (privKey instanceof RSAPrivateKey) {
 					RSAPublicKey pubkey = (RSAPublicKey) pair.getPublic();
-					pubKeys.put(entry.getKey(), RSASHA1Verify.encodePublicKey(pubkey));
+					pubKeys.put(entry.getKey(), RSASHA1Verify.get().encodePublicKey(pubkey));
 				} else if (privKey instanceof DSAPrivateKey) {
 					DSAPublicKey pubkey = (DSAPublicKey) pair.getPublic();
-					pubKeys.put(entry.getKey(), DSASHA1Verify.encodePublicKey(pubkey));
+					pubKeys.put(entry.getKey(), DSASHA1Verify.get().encodePublicKey(pubkey));
 				} else if (privKey instanceof ECPrivateKey) {
 					ECPublicKey pubkey = (ECPublicKey) pair.getPublic();
 					pubKeys.put(entry.getKey(), ECDSASHA2Verify.getVerifierForKey(pubkey).encodePublicKey(pubkey));

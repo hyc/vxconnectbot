@@ -2,6 +2,8 @@ package sk.vx.connectbot.service;
 
 import java.io.IOException;
 import java.security.SecureRandom;
+import java.security.PrivateKey;
+import java.security.KeyPair;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -19,6 +21,8 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
 
+import com.trilead.ssh2.crypto.keys.Ed25519PrivateKey;
+import com.trilead.ssh2.crypto.keys.Ed25519PublicKey;
 import com.trilead.ssh2.signature.DSASHA1Verify;
 import com.trilead.ssh2.signature.RSASHA1Verify;
 import com.trilead.ssh2.signature.ECDSASHA2Verify;
@@ -79,21 +83,25 @@ public class AuthAgentService extends Service {
 		public byte[] sign(byte[] publicKey, byte[] data) throws RemoteException {
 			Log.d(TAG, "sign() called");
 			waitForTerminalManager();
-			Object trileadKey = keyPairFor(publicKey);
-			Log.d(TAG, "sign() - signing keypair found : "+trileadKey);
+			KeyPair pair = keyPairFor(publicKey);
+			Log.d(TAG, "sign() - signing keypair found : "+pair);
 
-			if (trileadKey == null) {
+			if (pair == null) {
 				return null;
 			}
 
-			if (trileadKey instanceof RSAPrivateKey) {
-				return sshEncodedSignatureFor(data, (RSAPrivateKey) trileadKey);
-			} else if (trileadKey instanceof DSAPrivateKey) {
-				return sshEncodedSignatureFor(data, (DSAPrivateKey) trileadKey);
+			PrivateKey privKey = pair.getPrivate();
+			if (privKey instanceof RSAPrivateKey) {
+				return sshEncodedSignatureFor(data, (RSAPrivateKey) privKey);
+			} else if (privKey instanceof DSAPrivateKey) {
+				return sshEncodedSignatureFor(data, (DSAPrivateKey) privKey);
+			} else if (privKey instanceof ECPrivateKey) {
+				return sshEncodedSignatureFor(data, (ECPrivateKey) privKey);
+			} else if (privKey instanceof Ed25519PrivateKey) {
+				return sshEncodedSignatureFor(data, (Ed25519PrivateKey) privKey);
 			}
 			return null;
 		}
-
 
 		private void waitForTerminalManager() throws RemoteException {
 			lock.lock();
@@ -114,7 +122,7 @@ public class AuthAgentService extends Service {
 			Map<String, byte[]> encodedPubKeysByName = new HashMap<String, byte[]>(keypairs.size());
 
 			for (Entry<String, KeyHolder> entry : keypairs.entrySet()) {
-				byte[] encodedKey = sshEncodedPubKeyFrom(entry.getValue().trileadKey);
+				byte[] encodedKey = sshEncodedPubKeyFrom(entry.getValue().pair);
 				if (encodedKey != null) {
 					encodedPubKeysByName.put(entry.getKey(), encodedKey);
 				}
@@ -122,36 +130,61 @@ public class AuthAgentService extends Service {
 			return encodedPubKeysByName;
 		}
 
-		private byte[] sshEncodedPubKeyFrom(Object trileadKey) {
+		private byte[] sshEncodedPubKeyFrom(KeyPair pair) {
 			try {
-				if (trileadKey instanceof RSAPrivateKey) {
-					RSAPublicKey pubkey = ((RSAPrivateKey) trileadKey).getPublicKey();
-					return RSASHA1Verify.encodeSSHRSAPublicKey(pubkey);
-				} else if (trileadKey instanceof DSAPrivateKey) {
-					DSAPublicKey pubkey = ((DSAPrivateKey) trileadKey).getPublicKey();
-					return DSASHA1Verify.encodeSSHDSAPublicKey(pubkey);
+				PrivateKey privKey = pair.getPrivate();
+				if (privKey instanceof RSAPrivateKey) {
+					RSAPublicKey pubkey = (RSAPublicKey) pair.getPublic();
+					return RSASHA1Verify.get().encodePublicKey(pubkey);
+				} else if (privKey instanceof DSAPrivateKey) {
+					DSAPublicKey pubkey = (DSAPublicKey) pair.getPublic();
+					return DSASHA1Verify.get().encodePublicKey(pubkey);
+				} else if (privKey instanceof ECPrivateKey) {
+					ECPublicKey pubkey = (ECPublicKey) pair.getPublic();
+					return ECDSASHA2Verify.getVerifierForKey(pubkey).encodePublicKey(pubkey);
+				} else if (privKey instanceof Ed25519PrivateKey) {
+					Ed25519PublicKey pubkey = (Ed25519PublicKey) pair.getPublic();
+					return Ed25519Verify.get().encodePublicKey(pubkey);
 				}
 			} catch (IOException e) {
-				Log.e(TAG, "Couldn't encode " + trileadKey, e);
+				Log.e(TAG, "Couldn't encode " + pair, e);
 			}
 			return null;
 		}
 
-		private byte[] sshEncodedSignatureFor(byte[] data, RSAPrivateKey trileadKey) {
+		private byte[] sshEncodedSignatureFor(byte[] data, RSAPrivateKey privKey) {
 			try {
-				RSASignature signature = RSASHA1Verify.generateSignature(data, trileadKey);
-				return RSASHA1Verify.encodeSSHRSASignature(signature);
+				return RSASHA1Verify.get().generateSignature(data, privKey, new SecureRandom());
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
 		}
 
-		private byte[] sshEncodedSignatureFor(byte[] data, DSAPrivateKey dsaPrivateKey) {
-			DSASignature signature = DSASHA1Verify.generateSignature(data, dsaPrivateKey, new SecureRandom());
-			return DSASHA1Verify.encodeSSHDSASignature(signature);
+		private byte[] sshEncodedSignatureFor(byte[] data, DSAPrivateKey privKey) {
+			try {
+				return DSASHA1Verify.get().generateSignature(data, privKey, new SecureRandom());
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
 		}
 
-		private Object keyPairFor(byte[] publicKey) {
+		private byte[] sshEncodedSignatureFor(byte[] data, ECPrivateKey privKey) {
+			try {
+				return ECDSASHA2Verify.getVerifierForKey(privKey).generateSignature(data, privKey, new SecureRandom());
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		private byte[] sshEncodedSignatureFor(byte[] data, Ed25519PrivateKey privKey) {
+			try {
+				return Ed25519Verify.get().generateSignature(data, privKey, new SecureRandom());
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		private KeyPair keyPairFor(byte[] publicKey) {
 			String nickname = manager.getKeyNickname(publicKey);
 
 			if (nickname == null) {

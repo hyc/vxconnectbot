@@ -589,6 +589,7 @@ public class HostDatabase extends RobustSQLiteOpenHelper {
 		return known;
 	}
 
+	/*
 	public List<String> getHostKeyAlgorithmsForHost(String hostname, int port) {
 		HashMap<String, String> selection = new HashMap<>();
 		selection.put(FIELD_HOST_HOSTNAME, hostname);
@@ -620,6 +621,9 @@ public class HostDatabase extends RobustSQLiteOpenHelper {
 
 		return knownAlgorithms;
 	}
+	*/
+
+
 	/**
 	 * Unset any hosts using a pubkey ID that has been deleted.
 	 * @param pubkeyId
