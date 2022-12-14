@@ -13,6 +13,9 @@ android {
 
     defaultConfig {
         applicationId "sk.vx.connectbot"
+        versionName androidGitVersion.name()
+        versionCode androidGitVersion.code()
+
         minSdkVersion 14
         targetSdkVersion 22
     }
@@ -23,12 +26,17 @@ android {
 
     buildTypes {
         release {
+            shrinkResources true
             minifyEnabled true
-            proguardFiles 'proguard.cfg'
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard.cfg'
+        }
+
+        debug {
+            applicationIdSuffix ".debug"
         }
     }
 }
 
 dependencies {
-	implementation 'org.connectbot:sshlib:2.2.21'
+    implementation 'org.connectbot:sshlib:2.2.21'
 }
