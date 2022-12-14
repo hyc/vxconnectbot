@@ -56,7 +56,7 @@ VX ConnectBot is licensed under the Apache License, Version 2.0
 
 ## Credits
 
-This software is based on [ConnectBot](http://code.google.com/p/connectbot/)
+This software is based on [ConnectBot](https://github.com/connectbot/connectbot)
 
 ConnectBot Copyright (c) 2007-2011 [Kenny Root](http://the-b.org), [Jeffrey Sharkey](http://jsharkey.org)
 

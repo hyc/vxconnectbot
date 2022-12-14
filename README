@@ -1,16 +1,6 @@
 Compiling
 ---------
 
-To compile ConnectBot using Ant, you must specify where your Android SDK is via the local.properties file. Insert a line similar to the following with the full path to your SDK:
+This project has been imported into Android Studio using gradle, so you
+should be able to build it directly from there.
 
-sdk.dir=/usr/local/android
-
-
-ProGuard Support
-----------------
-
-Download the ProGuard distribution from its website at http://proguard.sourceforge.net/ and place the proguard.jar into the "tools" subdirectory in the ConnectBot root directory.
-
-When running ant to build ConnectBot and engage ProGuard, use:
-
-ant proguard release
