@@ -16,8 +16,8 @@ android {
         versionName androidGitVersion.name()
         versionCode androidGitVersion.code()
 
-        minSdkVersion 14
-        targetSdkVersion 22
+        minSdkVersion 8
+        targetSdkVersion 11
     }
 
 //	ndk {
